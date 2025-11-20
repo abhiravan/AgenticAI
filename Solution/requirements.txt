@@ -1,0 +1,21 @@
+# Jira-GitHub Auto Fix - Requirements
+# Python 3.10+
+
+# Web Framework
+Flask==3.0.0
+Werkzeug==3.0.1
+
+# Jira API
+jira==3.6.0
+
+# Azure OpenAI
+openai==1.12.0
+
+# HTTP Requests
+requests==2.31.0
+
+# Environment Variables
+python-dotenv==1.0.0
+
+# Utilities
+python-dateutil==2.8.2

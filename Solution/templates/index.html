@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jira-GitHub Auto Fix</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 30px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        .section h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .input-group input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
+        .issue-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 15px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .issue-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .issue-field {
+            margin-bottom: 10px;
+        }
+        
+        .issue-field strong {
+            color: #555;
+            display: inline-block;
+            min-width: 100px;
+        }
+        
+        .progress-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 15px;
+        }
+        
+        .progress-log {
+            max-height: 400px;
+            overflow-y: auto;
+            background: white;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        
+        .progress-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border-left: 4px solid #e0e0e0;
+        }
+        
+        .progress-item.info {
+            background: #e3f2fd;
+            border-left-color: #2196f3;
+        }
+        
+        .progress-item.success {
+            background: #e8f5e9;
+            border-left-color: #4caf50;
+        }
+        
+        .progress-item.error {
+            background: #ffebee;
+            border-left-color: #f44336;
+        }
+        
+        .progress-item.warning {
+            background: #fff3e0;
+            border-left-color: #ff9800;
+        }
+        
+        .progress-item-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        
+        .progress-item-step {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .progress-item-time {
+            font-size: 0.85em;
+            color: #666;
+        }
+        
+        .progress-item-message {
+            color: #555;
+            font-size: 0.95em;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-success {
+            background: #d1fae5;
+            border: 1px solid #6ee7b7;
+            color: #065f46;
+        }
+        
+        .alert-error {
+            background: #fee2e2;
+            border: 1px solid #fca5a5;
+            color: #991b1b;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .pr-link {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 15px 25px;
+            background: #10b981;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .pr-link:hover {
+            background: #059669;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.4);
+        }
+        
+        .loading-text {
+            color: #667eea;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Jira-GitHub Auto Fix</h1>
+            <p>Automatically analyze and fix bugs with AI-powered code generation</p>
+        </div>
+        
+        <div class="content">
+            <!-- Jira Issue Input Section -->
+            <div class="section">
+                <h2>📋 Fetch Jira Issue</h2>
+                <div class="input-group">
+                    <input 
+                        type="text" 
+                        id="issueKeyInput" 
+                        placeholder="Enter Jira issue key (e.g., PROJ-123)"
+                        onkeypress="if(event.key === 'Enter') fetchIssue()"
+                    >
+                    <button class="btn btn-primary" onclick="fetchIssue()" id="fetchBtn">
+                        Fetch Issue
+                    </button>
+                </div>
+                
+                <div id="issueDetails" class="hidden"></div>
+            </div>
+            
+            <!-- Create PR Section -->
+            <div class="section hidden" id="createPrSection">
+                <h2>🚀 Create Pull Request</h2>
+                <p style="margin-bottom: 15px; color: #666;">
+                    Click the button below to automatically analyze the issue, generate a fix, 
+                    commit changes, and create a pull request on GitHub.
+                </p>
+                <button class="btn btn-success" onclick="createPR()" id="createPrBtn">
+                    🔧 Auto-Fix & Create PR
+                </button>
+            </div>
+            
+            <!-- Progress Section -->
+            <div class="section hidden" id="progressSection">
+                <h2>⏳ Progress</h2>
+                <div class="progress-container">
+                    <div class="loading-text" id="statusText">Initializing workflow...</div>
+                    <div class="progress-log" id="progressLog"></div>
+                </div>
+            </div>
+            
+            <!-- Results Section -->
+            <div class="section hidden" id="resultsSection"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentIssueKey = '';
+        let currentWorkflowId = '';
+        let statusCheckInterval = null;
+
+        async function fetchIssue() {
+            const issueKey = document.getElementById('issueKeyInput').value.trim().toUpperCase();
+            
+            if (!issueKey) {
+                alert('Please enter a Jira issue key');
+                return;
+            }
+            
+            const fetchBtn = document.getElementById('fetchBtn');
+            fetchBtn.disabled = true;
+            fetchBtn.innerHTML = '<span class="spinner"></span> Fetching...';
+            
+            try {
+                const response = await fetch('/api/fetch-issue', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ issue_key: issueKey })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentIssueKey = issueKey;
+                    displayIssue(result.data);
+                    document.getElementById('createPrSection').classList.remove('hidden');
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            } catch (error) {
+                alert('Error fetching issue: ' + error.message);
+            } finally {
+                fetchBtn.disabled = false;
+                fetchBtn.innerHTML = 'Fetch Issue';
+            }
+        }
+
+        function displayIssue(issue) {
+            const html = `
+                <div class="issue-card">
+                    <h3>${issue.key}: ${issue.summary}</h3>
+                    <div class="issue-field">
+                        <strong>Status:</strong> ${issue.status}
+                    </div>
+                    <div class="issue-field">
+                        <strong>Priority:</strong> ${issue.priority}
+                    </div>
+                    <div class="issue-field">
+                        <strong>Assignee:</strong> ${issue.assignee}
+                    </div>
+                    <div class="issue-field">
+                        <strong>Type:</strong> ${issue.issue_type}
+                    </div>
+                    <div class="issue-field">
+                        <strong>Description:</strong>
+                        <div style="margin-top: 8px; padding: 10px; background: white; border-radius: 4px;">
+                            ${issue.description || 'No description'}
+                        </div>
+                    </div>
+                    <div class="issue-field">
+                        <a href="${issue.url}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600;">
+                            View in Jira →
+                        </a>
+                    </div>
+                </div>
+            `;
+            
+            const detailsDiv = document.getElementById('issueDetails');
+            detailsDiv.innerHTML = html;
+            detailsDiv.classList.remove('hidden');
+        }
+
+        async function createPR() {
+            if (!currentIssueKey) {
+                alert('Please fetch a Jira issue first');
+                return;
+            }
+            
+            const createBtn = document.getElementById('createPrBtn');
+            createBtn.disabled = true;
+            createBtn.innerHTML = '<span class="spinner"></span> Starting...';
+            
+            // Show progress section
+            document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+            document.getElementById('progressLog').innerHTML = '';
+            
+            try {
+                const response = await fetch('/api/create-pr', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ issue_key: currentIssueKey })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentWorkflowId = result.workflow_id;
+                    
+                    // Start polling for status
+                    statusCheckInterval = setInterval(checkWorkflowStatus, 2000);
+                } else {
+                    alert('Error: ' + result.error);
+                    createBtn.disabled = false;
+                    createBtn.innerHTML = '🔧 Auto-Fix & Create PR';
+                }
+            } catch (error) {
+                alert('Error creating PR: ' + error.message);
+                createBtn.disabled = false;
+                createBtn.innerHTML = '🔧 Auto-Fix & Create PR';
+            }
+        }
+
+        async function checkWorkflowStatus() {
+            if (!currentWorkflowId) return;
+            
+            try {
+                const response = await fetch(`/api/workflow/${currentWorkflowId}/status`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateProgressLog(result.progress_log);
+                    
+                    if (result.status === 'completed') {
+                        clearInterval(statusCheckInterval);
+                        displayResults(result.result);
+                        
+                        const createBtn = document.getElementById('createPrBtn');
+                        createBtn.disabled = false;
+                        createBtn.innerHTML = '🔧 Auto-Fix & Create PR';
+                    } else if (result.status === 'failed') {
+                        clearInterval(statusCheckInterval);
+                        displayError(result.result);
+                        
+                        const createBtn = document.getElementById('createPrBtn');
+                        createBtn.disabled = false;
+                        createBtn.innerHTML = '🔧 Auto-Fix & Create PR';
+                    } else {
+                        document.getElementById('statusText').textContent = 'Processing...';
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        function updateProgressLog(logs) {
+            const logDiv = document.getElementById('progressLog');
+            logDiv.innerHTML = '';
+            
+            logs.forEach(log => {
+                const item = document.createElement('div');
+                item.className = `progress-item ${log.status}`;
+                
+                const time = new Date(log.timestamp).toLocaleTimeString();
+                
+                item.innerHTML = `
+                    <div class="progress-item-header">
+                        <span class="progress-item-step">${log.step}</span>
+                        <span class="progress-item-time">${time}</span>
+                    </div>
+                    <div class="progress-item-message">${log.message}</div>
+                `;
+                
+                logDiv.appendChild(item);
+            });
+            
+            // Scroll to bottom
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function displayResults(result) {
+            const resultsDiv = document.getElementById('resultsSection');
+            
+            if (result.success) {
+                document.getElementById('statusText').textContent = '✅ Success!';
+                
+                const html = `
+                    <div class="alert alert-success">
+                        <strong>✅ Pull Request Created Successfully!</strong>
+                    </div>
+                    <div class="issue-card">
+                        <h3>PR Details</h3>
+                        <div class="issue-field">
+                            <strong>Issue:</strong> ${result.issue_key}
+                        </div>
+                        <div class="issue-field">
+                            <strong>Branch:</strong> ${result.branch}
+                        </div>
+                        <div class="issue-field">
+                            <strong>PR Number:</strong> #${result.pr_number}
+                        </div>
+                        <a href="${result.pr_url}" target="_blank" class="pr-link">
+                            🔗 View Pull Request on GitHub
+                        </a>
+                    </div>
+                `;
+                
+                resultsDiv.innerHTML = html;
+            } else {
+                document.getElementById('statusText').textContent = '❌ Failed';
+                
+                const html = `
+                    <div class="alert alert-error">
+                        <strong>❌ Workflow Failed</strong><br>
+                        ${result.error || 'Unknown error occurred'}
+                    </div>
+                `;
+                
+                resultsDiv.innerHTML = html;
+            }
+            
+            resultsDiv.classList.remove('hidden');
+        }
+
+        function displayError(result) {
+            displayResults(result);
+        }
+    </script>
+</body>
+</html>
