@@ -130,6 +130,22 @@ class WorkflowOrchestrator:
             repo_files = self._list_repo_files(self.git_service.repo_path)
             self.log_progress('scan_repo', f'Found {len(repo_files)} files', 'success')
             
+            # Step 4.6: Identify target files from analysis
+            target_files = analysis.get('files_to_modify', [])
+            if target_files:
+                self.log_progress(
+                    'identify_files',
+                    f"Target files identified: {', '.join(target_files)}",
+                    'success',
+                    {'target_files': target_files}
+                )
+            else:
+                self.log_progress(
+                    'identify_files',
+                    'No specific files identified, AI will determine from context',
+                    'warning'
+                )
+            
             # Step 5: Generate code fix with repository context
             self.log_progress('generate_fix', 'Generating code fix with AI')
             fix_result = self.llm_service.generate_code_fix(
@@ -149,7 +165,17 @@ class WorkflowOrchestrator:
             patch = fix_result['patch']
             self.log_progress('generate_fix', 'Code fix generated', 'success')
             
-            # Step 6: Apply patch
+            # Step 6: Extract and show files to be patched
+            files_to_patch = self._extract_files_from_patch(patch)
+            if files_to_patch:
+                self.log_progress(
+                    'identify_patch_files',
+                    f"Files to be modified: {', '.join(files_to_patch)}",
+                    'info',
+                    {'patch_files': files_to_patch}
+                )
+            
+            # Step 7: Apply patch
             self.log_progress('apply_patch', 'Applying code changes')
             apply_result = self.git_service.apply_patch(patch)
             
@@ -173,6 +199,12 @@ class WorkflowOrchestrator:
                     apply_result = self.git_service.apply_patch(refined_patch)
                     
                     if not apply_result['success']:
+                        self.log_progress(
+                            'rollback',
+                            'Patch failed, reverting branch creation',
+                            'error'
+                        )
+                        self._rollback_branch(branch_name)
                         return {
                             'success': False,
                             'step': 'apply_patch',
@@ -189,6 +221,12 @@ class WorkflowOrchestrator:
             commit_result = self.git_service.commit_changes(commit_message)
             
             if not commit_result['success']:
+                self.log_progress(
+                    'rollback',
+                    'Commit failed, reverting branch creation',
+                    'error'
+                )
+                self._rollback_branch(branch_name)
                 return {
                     'success': False,
                     'step': 'commit_changes',
@@ -203,6 +241,12 @@ class WorkflowOrchestrator:
             push_result = self.git_service.push_branch(branch_name)
             
             if not push_result['success']:
+                self.log_progress(
+                    'rollback',
+                    'Push failed, reverting branch creation',
+                    'error'
+                )
+                self._rollback_branch(branch_name)
                 return {
                     'success': False,
                     'step': 'push_branch',
@@ -226,6 +270,12 @@ class WorkflowOrchestrator:
             )
             
             if not pr_result['success']:
+                self.log_progress(
+                    'rollback',
+                    'PR creation failed, reverting branch (pushed branch will remain for review)',
+                    'warning'
+                )
+                # Note: We keep the pushed branch since it might be useful for debugging
                 return {
                     'success': False,
                     'step': 'create_pr',
@@ -253,6 +303,10 @@ class WorkflowOrchestrator:
             
         except Exception as e:
             self.log_progress('error', f'Unexpected error: {str(e)}', 'error')
+            # Try to rollback if we created a branch
+            if 'branch_name' in locals():
+                self.log_progress('rollback', 'Unexpected error, reverting branch', 'error')
+                self._rollback_branch(branch_name)
             return {
                 'success': False,
                 'step': 'unknown',
@@ -341,6 +395,66 @@ class WorkflowOrchestrator:
         except Exception as e:
             print(f"Error listing files: {e}")
             return []
+    
+    def _extract_files_from_patch(self, patch_text):
+        """
+        Extract filenames from patch
+        
+        Args:
+            patch_text: Unified diff patch text
+        
+        Returns:
+            List of filenames found in patch
+        """
+        import re
+        files = []
+        
+        # Match lines like: --- a/path/to/file.py or +++ b/path/to/file.py
+        pattern = r'^[+-]{3}\s+[ab]/(.+)$'
+        
+        for line in patch_text.split('\n'):
+            match = re.match(pattern, line)
+            if match:
+                filename = match.group(1)
+                # Ignore /dev/null (for new/deleted files markers)
+                if filename != '/dev/null' and filename not in files:
+                    files.append(filename)
+        
+        return files
+    
+    def _rollback_branch(self, branch_name):
+        """
+        Rollback branch creation by switching to main and deleting the branch
+        
+        Args:
+            branch_name: Name of branch to delete
+        """
+        try:
+            self.log_progress('rollback', f'Switching back to main branch', 'info')
+            # Switch back to main
+            self.git_service._run_command(['git', 'checkout', 'main'], check=False)
+            
+            # Delete the feature branch
+            self.log_progress('rollback', f'Deleting branch: {branch_name}', 'info')
+            result = self.git_service._run_command(
+                ['git', 'branch', '-D', branch_name],
+                check=False
+            )
+            
+            if result.returncode == 0:
+                self.log_progress('rollback', 'Branch deleted successfully', 'success')
+            else:
+                self.log_progress(
+                    'rollback',
+                    f'Failed to delete branch: {result.stderr}',
+                    'warning'
+                )
+        except Exception as e:
+            self.log_progress(
+                'rollback',
+                f'Error during rollback: {str(e)}',
+                'warning'
+            )
     
     def get_progress_log(self):
         """Get the complete progress log"""
