@@ -125,98 +125,132 @@ class WorkflowOrchestrator:
             
             self.log_progress('create_branch', branch_result['message'], 'success')
             
-            # Step 4.5: List repository files for context
-            self.log_progress('scan_repo', 'Scanning repository structure')
+            # Step 4.5: List repository files for context (filtered whitelist)
+            self.log_progress('scan_repo', 'Scanning repository for allowed files')
             repo_files = self._list_repo_files(self.git_service.repo_path)
-            self.log_progress('scan_repo', f'Found {len(repo_files)} files', 'success')
             
-            # Step 4.6: Identify target files from analysis
+            if repo_files:
+                self.log_progress(
+                    'scan_repo', 
+                    f'Found {len(repo_files)} allowed file(s): {", ".join(repo_files)}', 
+                    'success'
+                )
+            else:
+                self.log_progress('scan_repo', 'No allowed files found in repository', 'warning')
+            
+            # Step 4.6: Identify target files from analysis (filter to allowed files)
             target_files = analysis.get('files_to_modify', [])
-            if target_files:
+            
+            # Filter target files to only include allowed ones
+            allowed_filenames = {
+                'complex_promo.sql', 'nt_msp_pricearea_load.py',
+                'nt_msp_pricearea_query.py', 'nt_pchg_audit.py', 'price_load.py'
+            }
+            
+            filtered_targets = []
+            for tf in target_files:
+                filename = tf.split('/')[-1].lower()
+                if filename in allowed_filenames:
+                    filtered_targets.append(tf)
+            
+            if filtered_targets:
                 self.log_progress(
                     'identify_files',
-                    f"Target files identified: {', '.join(target_files)}",
+                    f"Target files identified (from allowed list): {', '.join(filtered_targets)}",
                     'success',
-                    {'target_files': target_files}
+                    {'target_files': filtered_targets}
                 )
             else:
                 self.log_progress(
                     'identify_files',
-                    'No specific files identified, AI will determine from context',
+                    'No specific files identified from analysis, will use first allowed file',
                     'warning'
                 )
             
-            # Step 5: Generate code fix with repository context
-            self.log_progress('generate_fix', 'Generating code fix with AI')
-            fix_result = self.llm_service.generate_code_fix(
-                issue_data, 
-                analysis,
-                repo_files=repo_files
-            )
+            # Step 5: Add comments to identified files (happy path)
+            self.log_progress('add_comments', 'Adding documentation comments to files')
             
-            if not fix_result['success']:
+            # Determine which file to comment (prioritize Python files)
+            files_to_comment = filtered_targets if filtered_targets else []
+            if not files_to_comment and repo_files:
+                # Prioritize Python files to avoid encoding issues with SQL
+                py_files = [f for f in repo_files if f.endswith('.py')]
+                sql_files = [f for f in repo_files if f.endswith('.sql')]
+                # Try Python files first, then SQL
+                files_to_comment = py_files + sql_files
+            
+            if not files_to_comment:
+                self.log_progress(
+                    'rollback',
+                    'No files identified for commenting',
+                    'error'
+                )
+                self._rollback_branch(branch_name)
                 return {
                     'success': False,
-                    'step': 'generate_fix',
-                    'error': 'Failed to generate fix',
+                    'step': 'add_comments',
+                    'error': 'No suitable files found to add comments',
                     'log': self.progress_log
                 }
             
-            patch = fix_result['patch']
-            self.log_progress('generate_fix', 'Code fix generated', 'success')
+            # Try to add comment to files (with retry on encoding errors)
+            comment_text = (
+                f"Issue: {issue_data['summary']} - "
+                f"Root cause: {analysis.get('root_cause', 'Under investigation')[:100]}"
+            )
             
-            # Step 6: Extract and show files to be patched
-            files_to_patch = self._extract_files_from_patch(patch)
-            if files_to_patch:
+            comment_result = None
+            for target_file in files_to_comment:
                 self.log_progress(
-                    'identify_patch_files',
-                    f"Files to be modified: {', '.join(files_to_patch)}",
-                    'info',
-                    {'patch_files': files_to_patch}
-                )
-            
-            # Step 7: Apply patch
-            self.log_progress('apply_patch', 'Applying code changes')
-            apply_result = self.git_service.apply_patch(patch)
-            
-            if not apply_result['success']:
-                # Try to refine the patch
-                self.log_progress(
-                    'apply_patch',
-                    'Initial patch failed, refining...',
-                    'warning'
+                    'add_comments',
+                    f"Attempting to add comment to: {target_file}",
+                    'info'
                 )
                 
-                refine_result = self.llm_service.refine_patch(
-                    issue_data,
-                    analysis,
-                    patch,
-                    apply_result['error']
+                comment_result = self.git_service.add_comment_to_file(
+                    target_file,
+                    jira_issue_key,
+                    comment_text
                 )
                 
-                if refine_result['success']:
-                    refined_patch = refine_result['patch']
-                    apply_result = self.git_service.apply_patch(refined_patch)
-                    
-                    if not apply_result['success']:
-                        self.log_progress(
-                            'rollback',
-                            'Patch failed, reverting branch creation',
-                            'error'
-                        )
-                        self._rollback_branch(branch_name)
-                        return {
-                            'success': False,
-                            'step': 'apply_patch',
-                            'error': f"Patch failed to apply: {apply_result['error']}",
-                            'log': self.progress_log
-                        }
+                if comment_result['success']:
+                    self.log_progress(
+                        'add_comments',
+                        f"Successfully added comment to {target_file}",
+                        'success'
+                    )
+                    break
+                else:
+                    self.log_progress(
+                        'add_comments',
+                        f"Failed to add comment to {target_file}: {comment_result['error']}",
+                        'warning'
+                    )
             
-            self.log_progress('apply_patch', 'Code changes applied', 'success')
+            # If all files failed, rollback
+            if not comment_result or not comment_result['success']:
+                self.log_progress(
+                    'rollback',
+                    'Failed to add comment to any allowed file',
+                    'error'
+                )
+                self._rollback_branch(branch_name)
+                return {
+                    'success': False,
+                    'step': 'add_comments',
+                    'error': 'Unable to add comments to any file due to encoding issues',
+                    'log': self.progress_log
+                }
             
-            # Step 7: Commit changes
-            commit_message = f"{jira_issue_key}: {issue_data['summary']}"
-            self.log_progress('commit_changes', 'Committing changes')
+            self.log_progress(
+                'add_comments',
+                f"Comment added to {target_file}",
+                'success'
+            )
+            
+            # Step 6: Commit changes
+            commit_message = f"docs({jira_issue_key}): Add documentation comment for {issue_data['summary']}"
+            self.log_progress('commit_changes', 'Committing documentation changes')
             
             commit_result = self.git_service.commit_changes(commit_message)
             
@@ -336,8 +370,9 @@ class WorkflowOrchestrator:
             "## Root Cause",
             analysis.get('root_cause', 'Analysis in progress'),
             "",
-            "## Solution",
-            analysis.get('proposed_fix', 'Fix applied based on AI analysis'),
+            "## Documentation Added",
+            "This PR adds documentation comments to track the issue and proposed solution.",
+            "The comments reference the Jira issue and summarize the root cause for future reference.",
             "",
             "## Files Modified",
         ]
@@ -345,24 +380,26 @@ class WorkflowOrchestrator:
         files = analysis.get('files_to_modify', [])
         if files:
             for file in files:
-                body_parts.append(f"- `{file}`")
+                body_parts.append(f"- `{file}` - Added documentation comment")
         else:
             body_parts.append("- See commit for details")
         
         body_parts.extend([
             "",
-            "## Testing",
-            analysis.get('test_strategy', 'Manual testing recommended'),
+            "## Next Steps",
+            "- Review the documented issue",
+            "- Implement the actual fix based on the root cause analysis",
+            "- Update tests as needed",
             "",
             "---",
-            "*This PR was automatically generated by the Jira-GitHub Auto Fix system.*"
+            "*This PR was automatically generated by the Jira-GitHub Auto Fix system (Documentation Mode).*"
         ])
         
         return "\n".join(body_parts)
     
     def _list_repo_files(self, repo_path):
         """
-        List code files in repository
+        List code files in repository (filtered to specific allowed files)
         
         Args:
             repo_path: Path to repository
@@ -372,26 +409,51 @@ class WorkflowOrchestrator:
         """
         from pathlib import Path
         
-        code_extensions = {
-            '.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.go', 
-            '.rb', '.php', '.cs', '.cpp', '.c', '.h', '.swift', '.kt',
-            '.rs', '.scala', '.sh', '.yaml', '.yml', '.json', '.xml'
+        # Only consider these specific files in root directory
+        allowed_files = {
+            'complex_promo.sql',
+            'nt_msp_pricearea_load.py',
+            'nt_msp_pricearea_query.py',
+            'nt_pchg_audit.py',
+            'price_load.py'
         }
         
-        files = []
+        # Folders to completely ignore
+        ignore_folders = {
+            'Solution', 'solution',
+            'Reference', 'reference', 
+            '.env', '.venv', 'venv', 'env',
+            '.git', '.github',
+            'node_modules', '__pycache__', 
+            'dist', 'build', 'target'
+        }
+        
+        py_files = []
+        sql_files = []
+        
         try:
             for path in Path(repo_path).rglob('*'):
-                # Skip hidden directories and common ignore paths
+                # Skip hidden directories
                 if any(part.startswith('.') for part in path.parts):
                     continue
-                if any(x in path.parts for x in ['node_modules', '__pycache__', 'dist', 'build', 'target', 'venv']):
+                
+                # Skip ignored folders
+                if any(folder in path.parts for folder in ignore_folders):
                     continue
                 
-                if path.is_file() and path.suffix in code_extensions:
-                    rel_path = path.relative_to(repo_path)
-                    files.append(str(rel_path).replace('\\', '/'))
+                # Only include files from allowed list
+                if path.is_file():
+                    filename_lower = path.name.lower()
+                    if filename_lower in allowed_files:
+                        rel_path = str(path.relative_to(repo_path)).replace('\\', '/')
+                        # Separate Python and SQL files
+                        if rel_path.endswith('.py'):
+                            py_files.append(rel_path)
+                        elif rel_path.endswith('.sql'):
+                            sql_files.append(rel_path)
             
-            return sorted(files)[:100]  # Limit to first 100 files
+            # Return Python files first (to avoid encoding issues), then SQL
+            return sorted(py_files) + sorted(sql_files)
         except Exception as e:
             print(f"Error listing files: {e}")
             return []

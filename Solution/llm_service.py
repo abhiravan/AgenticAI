@@ -125,27 +125,14 @@ class LLMService:
         system_message = {
             "role": "system",
             "content": (
-                "You are an expert code generator. Create REALISTIC code fixes as unified diff patches. "
-                "CRITICAL RULES:\n"
-                "1. Each diff MUST start with 'diff --git a/filepath b/filepath'\n"
-                "2. Include '--- a/filepath' and '+++ b/filepath' headers\n"
-                "3. Include '@@ -line,count +line,count @@' hunk headers\n"
-                "4. Use real file paths that exist in the repository\n"
-                "5. Include 3 lines of context before and after changes\n"
-                "6. Only modify minimal lines needed\n"
-                "7. Wrap ENTIRE response in ```diff code fence\n\n"
-                "EXAMPLE FORMAT:\n"
-                "```diff\n"
-                "diff --git a/src/main.py b/src/main.py\n"
-                "--- a/src/main.py\n"
-                "+++ b/src/main.py\n"
-                "@@ -10,7 +10,7 @@\n"
-                " def process_data(data):\n"
-                "     if data is None:\n"
-                "-        return data.value\n"
-                "+        return None  # Fixed NullPointerException\n"
-                "     return data.value\n"
-                "```"
+                "You are an expert code commentator. Add helpful comments to document the fix. "
+                "TASK: Add inline comments explaining the issue and solution.\n"
+                "OUTPUT FORMAT: Provide ONLY the filename and the comment text.\n"
+                "Example:\n"
+                "FILE: src/main.py\n"
+                "COMMENT: # TODO [JIRA-123]: Fix null pointer exception - added validation\n"
+                "\n"
+                "Keep comments concise and reference the Jira issue."
             )
         }
         
@@ -167,10 +154,8 @@ class LLMService:
             "role": "user",
             "content": (
                 f"{context}"
-                f"Generate a COMPLETE unified diff patch with proper headers to fix this issue. "
-                f"Use realistic file paths from the repository. "
-                f"Include context lines and proper hunk headers. "
-                f"Make the patch applicable with 'git apply'."
+                f"Generate a comment to document this issue in the most relevant file. "
+                f"Output format: FILE: <filepath>\nCOMMENT: <comment text>"
             )
         }
         

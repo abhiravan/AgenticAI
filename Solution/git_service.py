@@ -343,3 +343,76 @@ class GitService:
             return files
         except:
             return []
+    
+    def add_comment_to_file(self, filepath, issue_key, comment_text):
+        """
+        Add a comment to the beginning of a file
+        
+        Args:
+            filepath: Relative path to file in repository
+            issue_key: Jira issue key
+            comment_text: Comment text to add
+        
+        Returns:
+            Success status
+        """
+        try:
+            target_file = self.repo_path / filepath
+            
+            if not target_file.exists():
+                return {
+                    'success': False,
+                    'error': f'File not found: {filepath}'
+                }
+            
+            # Determine comment style based on file extension
+            ext = target_file.suffix
+            if ext in ['.py', '.sh', '.yaml', '.yml']:
+                comment = f'# [{issue_key}] {comment_text}\n'
+            elif ext == '.sql':
+                comment = f'-- [{issue_key}] {comment_text}\n'
+            elif ext in ['.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.cs', '.go']:
+                comment = f'// [{issue_key}] {comment_text}\n'
+            elif ext in ['.html', '.xml']:
+                comment = f'<!-- [{issue_key}] {comment_text} -->\n'
+            else:
+                comment = f'# [{issue_key}] {comment_text}\n'
+            
+            # Try multiple encodings to read the file
+            content = None
+            for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                try:
+                    with open(target_file, 'r', encoding=encoding) as f:
+                        content = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if content is None:
+                return {
+                    'success': False,
+                    'error': f'Unable to read file with supported encodings (tried utf-8, latin-1, cp1252, iso-8859-1)'
+                }
+            
+            # Add comment at the beginning (after shebang if present)
+            lines = content.split('\n')
+            if lines and lines[0].startswith('#!'):
+                # Preserve shebang
+                new_content = lines[0] + '\n' + comment + '\n'.join(lines[1:])
+            else:
+                new_content = comment + content
+            
+            # Write back with UTF-8 encoding
+            with open(target_file, 'w', encoding='utf-8') as f:
+                f.write(new_content)
+            
+            return {
+                'success': True,
+                'message': f'Comment added to {filepath}',
+                'file': filepath
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Failed to add comment: {str(e)}'
+            }
